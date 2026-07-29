@@ -1,0 +1,20 @@
+repositories/
+
+VerificationRepository
+GuildRepository
+AuditRepository
+UserRepository
+SettingsRepository
+
+Each repository ONLY talks to SQL.
+
+
+Example:
+
+VerificationRepository
+
+save_pending()
+get_pending()
+complete()
+delete()
+update()

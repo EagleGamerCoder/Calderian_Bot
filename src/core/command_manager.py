@@ -1,0 +1,5 @@
+'''
+Automatically loads
+
+commands/
+'''

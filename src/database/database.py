@@ -1,0 +1,3 @@
+'''
+connects to PostgreSQL
+'''
