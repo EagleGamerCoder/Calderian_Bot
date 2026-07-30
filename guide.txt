@@ -25,13 +25,38 @@ RobloxService     VerificationRepository
               ▼
         Success Embed
 
-1. Core — bot startup, configuration, logging, service manager.
-2. Database — PostgreSQL connection and repository pattern.
-3. Roblox Service — wrapper around Roblox APIs.
-4. Verification Service — implement the complete verification workflow.
-5. Discord Commands — /verify, /sync, /unlink, etc., calling the service layer.
-6. Views — buttons, modals and persistent UI.
-7. Role Synchronisation — automatic role assignment and nickname updates.
-8. HTTP API — endpoints for Roblox game servers and external integrations.
-9. Caching & Permissions — improve performance and centralise access control.
-10. Logging, Auditing & Tests — add comprehensive logs, audit trails and automated tests.
+
+                 startup.py
+                      │
+          ┌───────────┴────────────┐
+          │                        │
+      config.py               VerificationBot
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+            ServiceManager                CommandManager
+                    │                             │
+          ┌─────────┼──────────┐          commands/*
+          │         │          │
+      Database   Roblox   Verification
+          │         │          │
+          └─────────┼──────────┘
+                    │
+              ServiceContainer
+                    │
+             Accessible Everywhere
+
+
+core/
+├── client.py            ← First
+├── config.py
+├── logger.py
+├── exceptions.py
+├── container.py
+├── service_manager.py
+├── command_manager.py
+├── event_manager.py
+├── view_manager.py
+├── startup.py
+├── types.py
+└── __init__.py

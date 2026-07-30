@@ -3,7 +3,11 @@ Load Config
 
 ↓
 
-Connect Database
+Create Bot
+
+↓
+
+Create Database
 
 ↓
 
@@ -19,10 +23,14 @@ Load Events
 
 ↓
 
-Start API
+Load Views
 
 ↓
 
-Login
+Start HTTP API
+
+↓
+
+bot.start(token)
 '''
 
