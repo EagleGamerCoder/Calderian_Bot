@@ -14,6 +14,7 @@ DiscordChannelID = NewType("DiscordChannelID", int)
 DiscordMessageID = NewType("DiscordMessageID", int)
 RobloxUserID = NewType("RobloxUserID", int)
 RobloxGroupID = NewType("RobloxGroupID", int)
+RobloxRank = NewType("RobloxRank", int)
 
 VerificationCode = NewType("VerificationCode", str)
 VerificationSessionID = NewType("VerificationSessionID", str)
