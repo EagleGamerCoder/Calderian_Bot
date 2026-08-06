@@ -49,7 +49,7 @@ class RuntimeComponents:
     view_manager: LifecycleManager
 
 
-class VerificationBot(commands.Bot):
+class CalderianBot(commands.Bot):
     """Discord client for a Roblox-to-Discord verification application.
 
     The client coordinates startup in a fixed order:

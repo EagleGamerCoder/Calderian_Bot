@@ -21,7 +21,7 @@ class EventManager:
         self,
         bot: commands.Bot,
         *,
-        package: str = "events",
+        package: str = "src.events",
         logger: logging.Logger | None = None,
     ) -> None:
         self._bot = bot

@@ -28,7 +28,7 @@ class CommandManager:
         self,
         bot: commands.Bot,
         *,
-        package: str = "commands",
+        package: str = "src.commands",
         logger: logging.Logger | None = None,
     ) -> None:
         self._bot = bot

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from .client import RuntimeComponents, VerificationBot
+from .client import RuntimeComponents, CalderianBot
 from .command_manager import CommandManager
 from .config import Config, ConfigurationError
 from .container import ServiceContainer
@@ -20,7 +20,7 @@ from .service_manager import ServiceManager
 from .view_manager import ViewManager
 
 
-def build_bot(config: Config, logger: logging.Logger | None = None) -> VerificationBot:
+def build_bot(config: Config, logger: logging.Logger | None = None) -> CalderianBot:
     """Construct a fully configured, but not yet connected, Discord bot.
 
     This function is deliberately synchronous and side-effect free.  It makes
@@ -28,7 +28,7 @@ def build_bot(config: Config, logger: logging.Logger | None = None) -> Verificat
     """
     application_logger = logger or logging.getLogger("verification_bot")
     container = ServiceContainer()
-    bot = VerificationBot(config, logger=application_logger)
+    bot = CalderianBot(config, logger=application_logger)
 
     service_manager = ServiceManager(config, container, application_logger)
     command_manager = CommandManager(bot, logger=application_logger)
