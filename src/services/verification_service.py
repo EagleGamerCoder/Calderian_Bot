@@ -107,10 +107,19 @@ class VerificationService:
         )
         return VerificationStart(pending=pending, roblox_user=roblox_user)
 
-    async def complete(self, code: VerificationCode) -> VerificationComplete:
+    async def complete(
+        self,
+        code: VerificationCode,
+        *,
+        actor_discord_user_id: DiscordUserID,
+    ) -> VerificationComplete:
         """Validate profile proof and atomically create the permanent account link."""
         pending = await self._verifications.get_pending(code)
         if pending is None or pending.status is not VerificationStatus.PENDING:
+            raise VerificationNotFound()
+        if pending.discord_user_id != actor_discord_user_id:
+            # A code is a proof for one Discord account, never a transferable
+            # token. Do not reveal who owns it to another member.
             raise VerificationNotFound()
         if pending.expires_at <= datetime.now(UTC):
             await self._verifications.expire_pending(code)

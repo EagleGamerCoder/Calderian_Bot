@@ -64,9 +64,54 @@ def register_services(manager: ServiceManager) -> None:
             depends_on=("database", "roblox", "roles"),
         )
 
-    The empty implementation is intentional: the core can be completed before
-    the business-layer services are written.
+    Importing here keeps this composition root as the only place that knows
+    about concrete services. Individual command modules remain testable and
+    depend only on the interfaces placed in ``bot.services``.
     """
+    from ..database.database import Database
+    from ..database.migrations import MigrationRunner
+    from ..database.repositories.audit_repository import AuditRepository
+    from ..database.repositories.guild_repository import GuildRepository
+    from ..database.repositories.verification_repository import VerificationRepository
+    from ..services.cache_service import CacheService
+    from ..services.guild_service import GuildService
+    from ..services.permission_service import PermissionService
+    from ..services.rank_sync_service import RankSyncService
+    from ..services.roblox_service import RobloxService
+    from ..services.role_service import RoleService
+    from ..services.verification_service import VerificationService
+
+    manager.register("database", Database.create)
+    manager.register("migrations", MigrationRunner.create, depends_on=("database",))
+    manager.register("verification_repository", VerificationRepository.create, depends_on=("migrations",))
+    manager.register("guild_repository", GuildRepository.create, depends_on=("migrations",))
+    manager.register("audit_repository", AuditRepository.create, depends_on=("migrations",))
+
+    manager.register("cache", CacheService.create)
+    manager.register("roblox", RobloxService.create)
+    manager.register("roles", RoleService.create)
+    manager.register("permissions", PermissionService.create)
+    manager.register(
+        "guilds",
+        GuildService.create,
+        depends_on=("guild_repository", "audit_repository"),
+    )
+    manager.register(
+        "verification",
+        VerificationService.create,
+        depends_on=("verification_repository", "audit_repository", "roblox"),
+    )
+    manager.register(
+        "rank_sync",
+        RankSyncService.create,
+        depends_on=(
+            "verification_repository",
+            "guild_repository",
+            "audit_repository",
+            "roblox",
+            "roles",
+        ),
+    )
 
 
 def register_views(manager: ViewManager) -> None:

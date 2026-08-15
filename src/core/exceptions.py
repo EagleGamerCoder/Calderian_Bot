@@ -8,7 +8,7 @@ database URLs, or internal stack traces to users.
 from __future__ import annotations
 
 
-class VerificationBotError(Exception):
+class CalderianBotError(Exception):
     """Base class for every expected application-level failure."""
 
     default_message = "Something went wrong while processing that request."
@@ -22,13 +22,13 @@ class VerificationBotError(Exception):
         return self.default_message
 
 
-class ConfigurationError(VerificationBotError):
+class ConfigurationError(CalderianBotError):
     """Application configuration is missing or invalid."""
 
     default_message = "The application is not configured correctly."
 
 
-class ServiceError(VerificationBotError):
+class ServiceError(CalderianBotError):
     """A registered application service could not perform its task."""
 
 
@@ -70,7 +70,7 @@ class RobloxRequestFailed(RobloxError):
     """A Roblox API response was unsuccessful or invalid."""
 
 
-class VerificationError(VerificationBotError):
+class VerificationError(CalderianBotError):
     """A verification request cannot be completed."""
 
     default_message = "Your verification could not be completed."
@@ -100,13 +100,13 @@ class VerificationAlreadyLinked(VerificationError):
     default_message = "That account is already linked to a verification record."
 
 
-class GuildNotConfigured(VerificationBotError):
+class GuildNotConfigured(CalderianBotError):
     """A command was used before a Discord server's settings were configured."""
 
     default_message = "This server has not been configured yet. Ask an administrator to set it up."
 
 
-class PermissionDenied(VerificationBotError):
+class PermissionDenied(CalderianBotError):
     """The caller is authenticated but lacks permission for the action."""
 
     default_message = "You do not have permission to use that action."
