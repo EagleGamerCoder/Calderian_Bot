@@ -1,3 +1,5 @@
+# NOT DONE
+
 """Calderian organisational structure and organisation lookup logic."""
 
 from __future__ import annotations

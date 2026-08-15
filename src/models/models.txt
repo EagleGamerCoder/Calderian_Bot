@@ -1,8 +1,0 @@
-Python objects.
-
-VerifiedUser
-GuildConfig
-PendingVerification
-AuditEntry
-
-Instead of dictionaries.

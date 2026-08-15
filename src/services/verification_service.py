@@ -1,228 +1,175 @@
-"""Business logic and API access for Roblox users and groups."""
+"""The business workflow for secure Roblox profile-code verification."""
+
+"""It issues 15-minute secure codes, checks the Roblox profile description, prevents duplicate account links, atomically saves a verified link, and creates audit entries."""
 
 from __future__ import annotations
 
+import logging
+import secrets
 from dataclasses import dataclass
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-import aiohttp
+from ..core.exceptions import (
+    VerificationAlreadyLinked,
+    VerificationError,
+    VerificationExpired,
+    VerificationNotFound,
+    VerificationProofNotFound,
+)
+from ..core.types import DiscordGuildID, DiscordUserID, VerificationCode
+from ..database.models import PendingVerification, VerifiedUser, VerificationStatus
+from ..database.repositories.audit_repository import AuditRepository
+from ..database.repositories.verification_repository import VerificationRepository
+from .roblox_service import RobloxService, RobloxUser
 
-from ..core.types import RobloxGroupID, RobloxRank, RobloxUserID
+if TYPE_CHECKING:
+    from ..core.config import Config
+    from ..core.container import ServiceContainer
 
 
-ROBLOX_API_BASE = "https://users.roblox.com"
-ROBLOX_GROUPS_API_BASE = "https://groups.roblox.com"
+VERIFICATION_LIFETIME = timedelta(minutes=15)
 
 
 @dataclass(frozen=True, slots=True)
-class RobloxUser:
-    """Basic Roblox account information."""
+class VerificationStart:
+    """Instructions a Discord command or button view can present to a member."""
 
-    user_id: RobloxUserID
-    username: str
-    display_name: str
+    pending: PendingVerification
+    roblox_user: RobloxUser
+
+    @property
+    def instructions(self) -> str:
+        return (
+            f"Add `{self.pending.code}` to the About section of your Roblox profile, "
+            "then press Verify again before the code expires."
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class RobloxGroupMembership:
-    """A Roblox user's membership and rank within a group."""
+class VerificationComplete:
+    """The permanent link created by a successful verification."""
 
-    group_id: RobloxGroupID
-    user_id: RobloxUserID
-    rank: RobloxRank
-    role_name: str
+    verified_user: VerifiedUser
+    guild_id: DiscordGuildID
 
 
-class RobloxAPIError(RuntimeError):
-    """Raised when a Roblox API request fails."""
-
-
-class RobloxNotFoundError(RobloxAPIError):
-    """Raised when a requested Roblox resource does not exist."""
-
-
-class RobloxService:
-    """Access Roblox users and group membership information."""
+class VerificationService:
+    """Create, validate, and complete one-time Roblox profile verification codes."""
 
     def __init__(
         self,
-        *,
-        session: aiohttp.ClientSession | None = None,
+        verification_repository: VerificationRepository,
+        audit_repository: AuditRepository,
+        roblox_service: RobloxService,
+        logger: logging.Logger | None = None,
     ) -> None:
-        self._session = session
-        self._owns_session = session is None
+        self._verifications = verification_repository
+        self._audit = audit_repository
+        self._roblox = roblox_service
+        self._log = logger or logging.getLogger("verification_bot.verification")
 
-    async def start(self) -> None:
-        """Create the HTTP session if this service owns it."""
-        if self._session is None:
-            self._session = aiohttp.ClientSession(
-                headers={
-                    "User-Agent": "CalderiaVerificationBot/1.0",
-                    "Accept": "application/json",
-                }
-            )
-
-    async def close(self) -> None:
-        """Close the HTTP session if this service owns it."""
-        if self._owns_session and self._session is not None:
-            await self._session.close()
-            self._session = None
-
-    async def get_user(
-        self,
-        user_id: RobloxUserID,
-    ) -> RobloxUser:
-        """Retrieve a Roblox user by their user ID."""
-        data = await self._request(
-            f"{ROBLOX_API_BASE}/v1/users/{int(user_id)}",
+    @classmethod
+    async def create(cls, _: Config, services: ServiceContainer) -> VerificationService:
+        """Factory used by ``ServiceManager`` after its dependencies are ready."""
+        return cls(
+            verification_repository=services.require("verification_repository"),
+            audit_repository=services.require("audit_repository"),
+            roblox_service=services.require("roblox"),
         )
 
-        return RobloxUser(
-            user_id=RobloxUserID(data["id"]),
-            username=data["name"],
-            display_name=data["displayName"],
-        )
-
-    async def get_user_by_username(
+    async def start(
         self,
-        username: str,
-    ) -> RobloxUser | None:
-        """Find a Roblox user by their username."""
-        username = username.strip()
-
-        if not username:
-            raise ValueError("username cannot be empty.")
-
-        data = await self._request(
-            f"{ROBLOX_API_BASE}/v1/usernames/users",
-            method="POST",
-            json={
-                "usernames": [username],
-                "excludeBannedUsers": False,
-            },
-        )
-
-        users = data.get("data", [])
-
-        if not users:
-            return None
-
-        user = users[0]
-
-        return RobloxUser(
-            user_id=RobloxUserID(user["id"]),
-            username=user["name"],
-            display_name=user["displayName"],
-        )
-
-    async def get_group_membership(
-        self,
-        user_id: RobloxUserID,
-        group_id: RobloxGroupID,
-    ) -> RobloxGroupMembership | None:
-        """
-        Return a user's membership in a Roblox group.
-
-        Returns None when the user is not a member of the group.
-        """
-        data = await self._request(
-            f"{ROBLOX_GROUPS_API_BASE}/v2/users/{int(user_id)}/groups/roles",
-        )
-
-        for membership in data.get("data", []):
-            group = membership.get("group", {})
-            role = membership.get("role", {})
-
-            if int(group.get("id", 0)) != int(group_id):
-                continue
-
-            return RobloxGroupMembership(
-                group_id=RobloxGroupID(group["id"]),
-                user_id=user_id,
-                rank=RobloxRank(role["rank"]),
-                role_name=role["name"],
-            )
-
-        return None
-
-    async def get_user_rank(
-        self,
-        user_id: RobloxUserID,
-        group_id: RobloxGroupID,
-    ) -> RobloxRank | None:
-        """Return a user's rank within a Roblox group."""
-        membership = await self.get_group_membership(
-            user_id,
-            group_id,
-        )
-
-        return membership.rank if membership else None
-
-    async def verify_group_membership(
-        self,
-        user_id: RobloxUserID,
-        group_id: RobloxGroupID,
-    ) -> bool:
-        """Return whether a Roblox user belongs to a group."""
-        return (
-            await self.get_group_membership(
-                user_id,
-                group_id,
-            )
-        ) is not None
-
-    async def _request(
-        self,
-        url: str,
         *,
-        method: str = "GET",
-        json: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Perform a Roblox API request and validate the response."""
-        if self._session is None:
-            await self.start()
+        discord_user_id: DiscordUserID,
+        guild_id: DiscordGuildID,
+        roblox_username: str,
+    ) -> VerificationStart:
+        """Resolve a Roblox account and issue a secure, expiring profile code."""
+        roblox_user = await self._roblox.get_user_by_username(roblox_username)
+        linked_user = await self._verifications.get_verified_by_roblox(roblox_user.user_id)
+        if linked_user is not None and linked_user.discord_user_id != discord_user_id:
+            raise VerificationAlreadyLinked(
+                "This Roblox account is already linked to another Discord user."
+            )
 
-        assert self._session is not None
+        pending = await self._verifications.create_pending(
+            code=_new_code(),
+            discord_user_id=discord_user_id,
+            guild_id=guild_id,
+            roblox_user_id=roblox_user.user_id,
+            expires_at=datetime.now(UTC) + VERIFICATION_LIFETIME,
+        )
+        self._log.info(
+            "Started verification for Discord user %s and Roblox user %s.",
+            discord_user_id,
+            roblox_user.user_id,
+        )
+        return VerificationStart(pending=pending, roblox_user=roblox_user)
 
-        try:
-            async with self._session.request(
-                method,
-                url,
-                json=json,
-            ) as response:
-                if response.status == 404:
-                    raise RobloxNotFoundError(
-                        f"Roblox resource was not found: {url}"
-                    )
+    async def complete(self, code: VerificationCode) -> VerificationComplete:
+        """Validate profile proof and atomically create the permanent account link."""
+        pending = await self._verifications.get_pending(code)
+        if pending is None or pending.status is not VerificationStatus.PENDING:
+            raise VerificationNotFound()
+        if pending.expires_at <= datetime.now(UTC):
+            await self._verifications.expire_pending(code)
+            raise VerificationExpired()
+        if pending.roblox_user_id is None:
+            raise VerificationError("The pending verification has no Roblox user.")
 
-                if response.status == 429:
-                    raise RobloxAPIError(
-                        "Roblox API rate limit reached."
-                    )
+        roblox_user = await self._roblox.get_user(pending.roblox_user_id)
+        if not await self._roblox.profile_contains_code(roblox_user.user_id, code):
+            raise VerificationProofNotFound()
 
-                if response.status >= 500:
-                    raise RobloxAPIError(
-                        f"Roblox API server error: HTTP {response.status}."
-                    )
+        linked_user = await self._verifications.get_verified_by_roblox(roblox_user.user_id)
+        if linked_user is not None and linked_user.discord_user_id != pending.discord_user_id:
+            raise VerificationAlreadyLinked(
+                "This Roblox account is already linked to another Discord user."
+            )
 
-                if response.status >= 400:
-                    body = await response.text()
+        verified_user = await self._verifications.complete_and_save_verified(
+            code=code,
+            discord_user_id=pending.discord_user_id,
+            roblox_user_id=roblox_user.user_id,
+            roblox_username=roblox_user.username,
+            roblox_display_name=roblox_user.display_name,
+        )
+        if verified_user is None:
+            # A simultaneous request consumed or expired the code after the proof check.
+            raise VerificationNotFound()
 
-                    raise RobloxAPIError(
-                        f"Roblox API request failed: "
-                        f"HTTP {response.status}: {body}"
-                    )
+        await self._audit.record(
+            guild_id=pending.guild_id,
+            action="member_verified",
+            target_discord_user_id=pending.discord_user_id,
+            target_roblox_user_id=roblox_user.user_id,
+            details=f"Roblox username={roblox_user.username}",
+        )
+        self._log.info(
+            "Completed verification for Discord user %s and Roblox user %s.",
+            pending.discord_user_id,
+            roblox_user.user_id,
+        )
+        return VerificationComplete(verified_user=verified_user, guild_id=pending.guild_id)
 
-                data = await response.json()
+    async def cancel(self, code: VerificationCode, *, actor_discord_user_id: DiscordUserID) -> bool:
+        """Cancel a still-pending verification code at the member's request."""
+        pending = await self._verifications.get_pending(code)
+        if pending is None or pending.discord_user_id != actor_discord_user_id:
+            return False
+        result = await self._verifications.cancel_pending(code)
+        if result:
+            await self._audit.record(
+                guild_id=pending.guild_id,
+                action="verification_cancelled",
+                actor_discord_user_id=actor_discord_user_id,
+                target_discord_user_id=pending.discord_user_id,
+                target_roblox_user_id=pending.roblox_user_id,
+            )
+        return result
 
-                if not isinstance(data, dict):
-                    raise RobloxAPIError(
-                        "Roblox API returned an unexpected response."
-                    )
 
-                return data
-
-        except aiohttp.ClientError as exc:
-            raise RobloxAPIError(
-                "Failed to communicate with the Roblox API."
-            ) from exc
+def _new_code() -> VerificationCode:
+    """Create a short displayable code with 80 bits of unpredictable entropy."""
+    return VerificationCode(f"VERIFY-{secrets.token_hex(10).upper()}")

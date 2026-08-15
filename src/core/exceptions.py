@@ -88,6 +88,12 @@ class VerificationExpired(VerificationError):
     default_message = "Your verification expired. Please start again with /verify."
 
 
+class VerificationProofNotFound(VerificationError):
+    """The expected one-time code is not present on the Roblox profile."""
+
+    default_message = "That verification code is not on the Roblox profile yet."
+
+
 class VerificationAlreadyLinked(VerificationError):
     """A Discord or Roblox account is already linked where it cannot be reused."""
 

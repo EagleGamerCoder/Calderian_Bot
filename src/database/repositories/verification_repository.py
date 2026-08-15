@@ -118,6 +118,47 @@ class VerificationRepository:
         )
         return result == "UPDATE 1"
 
+    async def complete_and_save_verified(
+        self,
+        *,
+        code: VerificationCode,
+        discord_user_id: DiscordUserID,
+        roblox_user_id: RobloxUserID,
+        roblox_username: str,
+        roblox_display_name: str,
+    ) -> VerifiedUser | None:
+        """Consume a valid code and save its account link in one transaction."""
+        async with self._database.transaction() as connection:
+            result = await connection.execute(
+                """
+                UPDATE pending_verifications
+                SET status = 'completed'
+                WHERE code = $1 AND status = 'pending' AND expires_at > NOW()
+                """,
+                code,
+            )
+            if result != "UPDATE 1":
+                return None
+            row = await connection.fetchrow(
+                """
+                INSERT INTO verified_users (
+                    discord_user_id, roblox_user_id, roblox_username, roblox_display_name
+                ) VALUES ($1, $2, $3, $4)
+                ON CONFLICT (discord_user_id) DO UPDATE SET
+                    roblox_user_id = EXCLUDED.roblox_user_id,
+                    roblox_username = EXCLUDED.roblox_username,
+                    roblox_display_name = EXCLUDED.roblox_display_name,
+                    updated_at = NOW()
+                RETURNING *
+                """,
+                discord_user_id,
+                roblox_user_id,
+                roblox_username,
+                roblox_display_name,
+            )
+        assert row is not None
+        return _to_verified_user(row)
+
     async def expire_pending(self, code: VerificationCode) -> bool:
         """Mark an expired pending code so it cannot be completed later."""
         result = await self._database.execute(
@@ -125,6 +166,18 @@ class VerificationRepository:
             UPDATE pending_verifications
             SET status = 'expired'
             WHERE code = $1 AND status = 'pending' AND expires_at <= NOW()
+            """,
+            code,
+        )
+        return result == "UPDATE 1"
+
+    async def cancel_pending(self, code: VerificationCode) -> bool:
+        """Cancel a still-pending code before it expires."""
+        result = await self._database.execute(
+            """
+            UPDATE pending_verifications
+            SET status = 'cancelled'
+            WHERE code = $1 AND status = 'pending'
             """,
             code,
         )
